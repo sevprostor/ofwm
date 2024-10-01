@@ -385,7 +385,7 @@ void setup() {
   //minPower = motor.GetLoad();
   //motor.Reverse();
 
-  Serial.println("BeastieTwister!");
+  Serial.println("Ozadchanka starting");
 
   //грузимся после креша
   
