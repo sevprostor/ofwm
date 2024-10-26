@@ -29,11 +29,20 @@ int speed = 0;
 int state = 0;
 bool working = false;
 int emp = 810, sw = 830, lw = 870, mw = 890, hw = 915, water = 0;
-int shakes[] = {80, 50, 20, 10}; //стирка и полоскания
-int tryes = 11, trs = 0; //попытки отжима
+int shakes[] = {80, 70, 60, 40, 20}; //стирка и полоскания
+//int program[] = {80, 70, 60, 40, 20};
+unsigned long shakeDur = 6000;
+unsigned long pauseDur = 10000;
+
+int tryes = 21, trs = 0; //попытки отжима
 bool pause = false, error = false, cancel = false, firstime = true, overheat = false, confirmed = false;
 
-int enabledSpread = 65; //60 допустимый разброс скоростей для отжима
+int enabledSpread = 61; //60 допустимый разброс скоростей для отжима
+
+unsigned long totalPower = 0;
+int tpc = 0;
+//unsigned long totalCycleTime = 0;
+int pauseCoeff = 8; //множитель, на который умножаем затраченную мощность и из этого получается пауза
 
 
 #define IR_1    0xA2
@@ -85,14 +94,8 @@ void flooding(int wLevel){
   int psDuration = pulseIn(11, HIGH);
   Serial.println("Filling drum...");
   //Serial.println(psDuration);
-  water = psDuration;
+  //water = psDuration;
   delay(500);
-
-
-  
-    static int t = 0;
-    static int vals[20];
-    static int average = 0;
     
 digitalWrite(5, HIGH); //кран
       delay(100);
@@ -108,7 +111,7 @@ delay(100);
 
        
 
-  while(psDuration < wLevel && wLevel < 920){
+  while(psDuration < wLevel && psDuration < 920){
       //motor.controlCall(); // ***rControl(); перенести в отдельный класс; // ***rControl(); перенести в отдельный класс
       
       
@@ -131,7 +134,7 @@ delay(100);
     delay(100);
     EEPROM.update(4, psDuration);
 
-    //water = psDuration;
+    water = psDuration;
  
   
 }
@@ -156,37 +159,54 @@ bool probeSpread(int s){
     return true;         
 }
 
-void washing(){ 
-  uint32_t now = millis();
+int washing(){ 
+  int tTime;
+  unsigned long now = millis();
+  unsigned long tpnow = millis();
   
   int h = 0;
   Motor::power = minPower;
-  int shakeDur;
-  int pauseDur;
+  //int shakeDur;
+  //int pauseDur;
   bool hh = false;
 
-  if(minPower > 35){
+  /* if(minPower > 35){
     shakeDur = 6000;
     pauseDur = 12000;
   }else{
     shakeDur = 6000;
     pauseDur = 8000;
 
-  }
+  } */
+
+  //timer_2 = millis();
+  unsigned long _totalPower = 0;
+  
+
   while(millis() - now < shakeDur && !pause){
     motor.controlCall(); // ***rControl(); перенести в отдельный класс; // ***// ***rControl(); перенести в отдельный класс перенести в отдельный класс
     motor.Spin(speed);
+
+    if(millis() - tpnow > 100){ 
+      // посчитаем, сколько сил нужно прилагать на цикл в общей сложности
+      // с помощью этой величины попробуем предсказать перегрев и рассчитать оптимальные паузы
+      _totalPower += Motor::power;
+      tpnow = millis();
+    }
+
     //hh = h;
     if(Motor::actualSpeed == 0){
     
       //Нет ли перегрева? Крутится ли барабан?
       //Иногда выпадают нулевые скорости. Поэтому мы делаем много измерений. Если в течение 4c скорость 0,
       //то можно считать, что барабан точно стоит при поданной мощности. Определенно, сработала термозащита мотора.
-
-      
+     
       if(hh) h++;   
       
-      if(h > 8) overheat = true;
+      if(h > 8){ // Случился перегрев. Отдохнем и чуть увеличим коэффициент паузы
+        overheat = true;
+        pauseCoeff += 1;
+      }
 
       hh = true;
       //pause = true;
@@ -197,19 +217,43 @@ void washing(){
     
     
   }
+  tpc++;
+  totalPower += _totalPower; //мощность затраченная на болтание всего
+
+  //totalPower = totalPower / tpc; 
+
+  Serial.println("Average power density per cycle:");
+  Serial.println(_totalPower);
+  Serial.println(totalPower / tpc);
+  
+  //if(tpc > 2){
+
+    if((totalPower / tpc) * pauseCoeff > shakeDur) pauseDur = (totalPower / tpc) * pauseCoeff;
+    else pauseDur = shakeDur;
+
+    if(pauseDur > 45000) pauseDur = 45000;
+
+    Serial.println("Calculated pause time:");
+    Serial.println(pauseDur);
+  //}
+  
   //hguard = millis();
   h = 0;
   Motor::power = 0;
-  motor.Reverse();
+  motor.Reverse(); //210ms
   now = millis();
   while(millis() - now < pauseDur && !pause){
     motor.controlCall(); // ***rControl(); перенести в отдельный класс; // ***rControl(); перенести в отдельный класс
   }
+
+  tTime = (210 + pauseDur + shakeDur) / 1000;
+  return tTime;
+
 }
 
 
 
-void machineResting(uint32_t timeout, uint32_t restTime = 600000){
+void machineResting(uint32_t timeout, uint32_t restTime = 300000){
   uint32_t now = millis();
   //Serial.println("Pause");
 
@@ -444,18 +488,23 @@ void loop() {
       //Если power < 35 то ок, 35...40 - средний, выше 45 - высокий
       //working = true;
       flooding(lw); //низкая вода
-      washing();
+      //washing();
+      minPower = motor.GetLoad();
+      //delay(1000);
 
       for(int i = 0; i < 2; i++){
-        minPower = motor.GetLoad();
+        
         //water = lw;
-        if(minPower > 30 && minPower < 40){
+        if(minPower > 20 && minPower < 30){
           flooding(mw);
           //water = mw;
         }
 
-        if(minPower > 40){
+        minPower = motor.GetLoad();
+
+        if(minPower > 30){
           flooding(hw);
+          i = 2;
           //water = hw;
         }
       }
@@ -474,6 +523,7 @@ void loop() {
       case 4: //полоскание 1
       case 5: //полоскание 2
       case 6: //полоскание 3
+      case 7:
         Serial.println("Saving state");
         EEPROM.update(0, state);
 
@@ -484,28 +534,28 @@ void loop() {
 
         shft = state - 3;
         //speed = EEPROM.read(6);
-        if(speed == 0 || speed > 40) speed = 25;
+        if(speed == 0 || speed > 40) speed = 22;
 
-        minPower = motor.GetLoad();
+        if(minPower == 0) minPower = motor.GetLoad();
 
         cancel = false;       
         for (int i = 0; i < shakes[shft]; i++){
           ishak++;
 
           if(pause) onPause();
-          if(overheat) machineResting(millis(), 1200000);
+          if(overheat) machineResting(millis());
 
           if(state == 0 || cancel){
             i = shakes[shft];
             cancel = false;
           }
 
-          if(ishak == 5){ // каждые 5 циклов сохраним
+          if(ishak == 10){ // каждые 10 циклов сохраним
             Serial.println("Saving shakes");
             
             ishak = 0;
             int shs = i;
-            EEPROM.update(2, shs);
+            EEPROM.update(2, tpc); //shs
             EEPROM.update(6, speed);
           }
           
@@ -513,7 +563,7 @@ void loop() {
 
           if(i == 6){ //днократный долив
             flooding(water);
-            minPower = motor.GetLoad();
+            //minPower = motor.GetLoad();
           }
         }
 
@@ -537,16 +587,20 @@ void loop() {
           case 6:
           state = 13;
           break;
+          case 7:
+          state = 14;
+          break;
 
         } 
       break;
 
-      case 7:
+      
       case 9:
       case 10:
       case 11:
       case 12:
       case 13:
+      case 14:
 
 
         
@@ -617,14 +671,14 @@ void loop() {
         int ms = 100;
         
 
-        if(minPower > 45) ms = 150; //допустимые скорости для разных нагрузок
-        else ms = 200;
+        if(minPower > 45) ms = 200; //допустимые скорости для разных нагрузок
+        else ms = 300;
 
         while(success && speed < 100 && !pause){
           motor.controlCall(); // ***rControl(); перенести в отдельный класс; // ***rControl(); перенести в отдельный класс
           timer_3 = millis();
           while(millis() - timer_3 < 4000){
-            motor.Spin(speed, 0, false);
+            motor.Spin(speed, 5, false);
           }
 
           if(Motor::actualSpeed < speed) success = false; //мотор не раскрутился, барабан сильно бьет, отбой
@@ -636,7 +690,7 @@ void loop() {
 
             timer_3 = millis();
             while(millis() - timer_3 < 2000){
-              motor.Spin(speed, 0, false);
+              motor.Spin(speed, 5, false);
             }
 
             Serial.println("Increasing speed");
@@ -667,7 +721,7 @@ void loop() {
           digitalWrite(8, HIGH); //реле питания кран/помпа
 
           timer_1 = millis();
-          while(millis() - timer_1 < 120000 && !pause){
+          while(millis() - timer_1 < 180000 && !pause){
             motor.controlCall(); // ***rControl(); перенести в отдельный класс; // ***rControl(); перенести в отдельный класс
             motor.Spin(speed);
           }
@@ -701,9 +755,14 @@ void loop() {
           state = 6;
           break;
           case 13:
+          state = 7;
+          break;
+          case 14:
           EEPROM.update(0, 0);
           EEPROM.update(2, 0);
-          
+          tpc = 0;
+          totalPower = 0;
+          totalCycleTime = 0;
           state = 0;
           break;
           }

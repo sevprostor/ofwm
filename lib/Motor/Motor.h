@@ -151,7 +151,7 @@ int Motor::Spin(int tspeed, int fork, bool updown){
     //Serial.println(Motor::actualSpeed);
     int farFromT[] = {10, 20, 40}; //пороги удаления от цели. Просто задам разную мощность для разного удаления
 
-    if(millis() - spintimer > 500){
+    if(millis() - spintimer > 200){
         spintimer = millis(); 
 
 /*         Serial.println("Tspeed");
@@ -175,11 +175,11 @@ int Motor::Spin(int tspeed, int fork, bool updown){
             
             if(updown){
                 if (tspeed - s > farFromT[0] - farFromT[0] - farFromT[0] && tspeed - s < 0)
-                    p = p - 2;
+                    p = p - 1; //2
                 if (tspeed - s > farFromT[1] - farFromT[1] - farFromT[1] && tspeed - s < farFromT[0] - farFromT[0] - farFromT[0])
-                    p = p - 15;
+                    p = p - 5; //15
                 if (tspeed - s < farFromT[2] - farFromT[2] - farFromT[2])
-                    p = p - 50;
+                    p = p - 20; //50
             }
 
             if(p > 255)
