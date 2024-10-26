@@ -30,7 +30,9 @@ int state = 0;
 bool working = false;
 int emp = 810, sw = 830, lw = 870, mw = 890, hw = 915, water = 0;
 int shakes[] = {80, 70, 60, 40, 20}; //стирка и полоскания
-//int program[] = {80, 70, 60, 40, 20};
+int program[] = {12, 8, 5};
+int totalShakes = 0;
+
 unsigned long shakeDur = 6000;
 unsigned long pauseDur = 10000;
 
@@ -433,29 +435,25 @@ void setup() {
 
   //грузимся после креша
   
-  int shft;
+  //int shft;
   
-  int oldstate = EEPROM.read(0);
-  int oldshakes = EEPROM.read(2);
+  //int oldstate = EEPROM.read(0);
+  totalShakes = EEPROM.read(2);
   //int oldmpower = EEPROM.read(4);
   
 
-  if(oldstate > 2 && oldstate < 9){ 
+  if(totalShakes > 0){ 
     
     //если машина стирала
+    state = 3;
     speed = EEPROM.read(6);
     water = EEPROM.read(4);
-    shft = oldstate - 3;
-    state = oldstate;
-    //minPower = oldmpower;
-    shakes[shft] = shakes[shft] - oldshakes;
     delay(100);
     //water = pulseIn(11, HIGH);
 
     Serial.println("Recovering after crash:");
-    Serial.println(state);
     Serial.println(water);
-    Serial.println(shakes[shft]);
+    Serial.println(totalShakes);
     Serial.println("***********************");
   
   }
@@ -465,8 +463,14 @@ void setup() {
 
 void loop() {
 
-  int shft = 0;
-  int ishak = 0;
+  //int shft = 0;
+  //int ishak = 0;
+  int sum, currentProc;
+  int totalProcs = sizeof(program) / sizeof(program[0]); //length calculation
+  int sumS = 0;
+  for(int y = 0; y < totalProcs; y++){
+    sumS += program[y];
+  }
   
 
   motor.controlCall(); // ***rControl(); перенести в отдельный класс; // ***rControl(); перенести в отдельный класс
@@ -520,89 +524,89 @@ void loop() {
       break;
 
       case 3: //стирка
-      case 4: //полоскание 1
-      case 5: //полоскание 2
-      case 6: //полоскание 3
-      case 7:
-        Serial.println("Saving state");
-        EEPROM.update(0, state);
 
         working = true;
-        //water =  EEPROM.read(6);
 
         flooding(water);
 
-        shft = state - 3;
-        //speed = EEPROM.read(6);
-        if(speed == 0 || speed > 40) speed = 22;
+        if(speed == 0 || speed > 35) speed = 22;
 
         if(minPower == 0) minPower = motor.GetLoad();
 
-        cancel = false;       
-        for (int i = 0; i < shakes[shft]; i++){
-          ishak++;
+        cancel = false;
+        
+        sum = program[0];
+        currentProc = 0;
+        while(sum < totalShakes){
+          currentProc++;
+          sum += program[currentProc];
+          
+        }
+        Serial.println("proc: "); Serial.println(currentProc);
+        Serial.println("totalShakes: "); Serial.println(totalShakes);
+
+
+
+        //int shks = sum - totalShakes; //сколько осталось в данной процедуре
+
+        //for (int i = 0; i < shakes[shft]; i++){
+        while(totalShakes < sum){
+          //ishak++;
+          int ii = 0;
+          int i = 0;
 
           if(pause) onPause();
           if(overheat) machineResting(millis());
 
-          if(state == 0 || cancel){
-            i = shakes[shft];
-            cancel = false;
-          }
+          
 
-          if(ishak == 10){ // каждые 10 циклов сохраним
+          if(ii == 6){ // каждые 10 циклов сохраним
             Serial.println("Saving shakes");
             
-            ishak = 0;
-            int shs = i;
-            EEPROM.update(2, tpc); //shs
+            ii = 0;
+            //int shs = i;
+            EEPROM.update(2, totalShakes); //shs
             EEPROM.update(6, speed);
           }
           
-          washing();
+          int takenTime = washing();
+          int timeElapsed = (takenTime * (sumS - totalShakes)) + (300 * totalProcs); //сколько осталось времени
+          Serial.println("Time elapsed (min): "); Serial.println(timeElapsed / 60);
+
 
           if(i == 6){ //днократный долив
             flooding(water);
             //minPower = motor.GetLoad();
           }
+
+          if(state == 0 || cancel){
+            totalShakes = sum;
+            cancel = false;
+          } else totalShakes++;
+
+          Serial.println("shakes: "); Serial.println(totalShakes);
+          Serial.println("target shakes: "); Serial.println(sum);
+
+
+
+          i++;
+          ii++;
         }
 
+        currentProc++;
+
         Serial.println("Saving shakes");
-        EEPROM.update(2, 0);
+        EEPROM.update(2, totalShakes); //0
           
         working = false;
 
-        //state = state + 7;
+        if(state == 3) state = 10; 
 
-         switch(state){
-          case 3:
-          state = 10;
-          break;
-          case 4:
-          state = 11;
-          break;
-          case 5:
-          state = 12;
-          break;
-          case 6:
-          state = 13;
-          break;
-          case 7:
-          state = 14;
-          break;
-
-        } 
       break;
 
       
       case 9:
       case 10:
-      case 11:
-      case 12:
-      case 13:
-      case 14:
-
-
         
         // Перед отжимом измеряем биения скорости.
         // Сначала плавно, осторожно раскручиваем барабан до 60. 
@@ -612,10 +616,6 @@ void loop() {
         
         delay(1000);
         int psDuration = pulseIn(11, HIGH);
-        Serial.println("level");
-        Serial.println(psDuration);
-        Serial.println("target level");
-        Serial.println(sw);
         delay(100);
         error = false;
 
@@ -624,8 +624,6 @@ void loop() {
 
 
         if(psDuration > sw){
-          Serial.println("Dumping water to low level");
-          delay(100);
           digitalWrite(5, LOW); //помпа
           delay(100);
           digitalWrite(8, HIGH); //реле питания кран/помпа
@@ -656,11 +654,6 @@ void loop() {
             motor.controlCall(); // ***rControl(); перенести в отдельный класс; // ***rControl(); перенести в отдельный класс
             motor.Spin(speed, 0, false);          
           }
-          
-          
-          /* delay(200);
-          digitalWrite(8, LOW); //реле кран/помпа
-          delay(200); */
         }
 
         //Начинаем измерять. Проводим 5 измерений, считаем сумму разбросов. Если она меньше 60, то прибавляем 10, и так до 100.
@@ -735,38 +728,26 @@ void loop() {
         working = false;
         if(!error){
           Serial.println("Spining complete! Going to next step.");
+
+          totalShakes++;
           overheat = true;
           machineResting(millis(), 30000);
           //delay(10000);
           motor.GetSpeed(true);
+
+          if(currentProc == totalProcs || state == 9){
+            //EEPROM.update(0, 0);
+            EEPROM.update(2, 0);
+            tpc = 0;
+            totalPower = 0;
+            state = 0;
+          }else{
+            state = 3;
+            EEPROM.update(2, totalShakes);
+          }
+
         }
 
-        if(!error){
-          switch(state){
-          case 9:
-          state = 0;
-          break;
-          case 10:
-          state = 4;
-          case 11:
-          state = 5;
-          break;
-          case 12:
-          state = 6;
-          break;
-          case 13:
-          state = 7;
-          break;
-          case 14:
-          EEPROM.update(0, 0);
-          EEPROM.update(2, 0);
-          tpc = 0;
-          totalPower = 0;
-          totalCycleTime = 0;
-          state = 0;
-          break;
-          }
-        }
 
       break;
 
